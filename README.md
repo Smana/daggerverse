@@ -10,6 +10,6 @@ Personal collection of Dagger modules
 ## ✅ Todo
 
 - [x] Flux
-- [] Crossplane compositions
-- [] Scan vulnerabilities
-- [] Build container image and push to an OCI repo
+- [ ] Crossplane compositions
+- [ ] Scan vulnerabilities
+- [ ] Build container image and push to an OCI repo
