@@ -1,4 +1,12 @@
-// This module checks the validity of Kubernetes manifests in a given directory using kubeconform.
+// This Dagger moduleis designed to validate Kubernetes manifests using a tool called kubeconform.
+// kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It can be used to check if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) are valid according to the specification.
+// What does this module exactly do?:
+// Directory specification: The module takes as input a directory containing Kubernetes manifests. This could be a single directory or a hierarchy of directories with multiple manifest files.
+// Manifest validation: For each manifest file in the specified directory, the module runs kubeconform to validate the resources in the file. This includes checking if the resources are valid Kubernetes resources, if they have all required fields, if the fields have valid values, etc.
+// Kustomization support: If the --kustomize option is provided, the module uses kustomize build to process kustomization files before validating them. Kustomization is a template-free way to customize application configuration, which simplifies the management of configuration files.
+// Exclusion of directories or files: The module supports excluding directories or files from validation using the --exclude option. This is useful if you have directories or files that you don't want to validate, such as test files, temporary files, etc.
+// Additional schemas: The module supports additional schemas located in the /schemas directory. This is useful if you have custom resources that are not part of the standard Kubernetes API. You can add schemas for these resources to the /schemas directory, and kubeconform will use them during validation.
+// Error handling: If kubeconform finds invalid resources, the module prints an error message and exits with a non-zero status. This allows the module to be used in scripts and CI/CD pipelines that need to fail when invalid resources are found.
 
 package main
 

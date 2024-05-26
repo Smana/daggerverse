@@ -1,0 +1,27 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - "main"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory:
+          - kubeconform
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Create Release
+      id: release
+      uses: googleapis/release-please-action@v4
+      with:
+        path: ${{ matrix.directory }}
+        include-component-in-tag: true
+        token: ${{ secrets.RELEASE_PLEASE_GITHUB_TOKEN }}
