@@ -5,11 +5,11 @@ Personal collection of Dagger modules
 
 | Module                          |           Description             |
 | --------------------------------| --------------------------------- |
-| [flux](./flux/)                 | Validate [FluxCD](https://fluxcd.io/) configuration  |
+| [Kubeconform](./kubeconform/)                 | Validate Kubernetes manifests against the OpenAPI specs |
 
 ## ✅ Todo
 
-- [x] Flux
+- [x] Kubeconform
 - [ ] Crossplane compositions
 - [ ] Scan vulnerabilities
 - [ ] Build container image and push to an OCI repo

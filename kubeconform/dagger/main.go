@@ -12,7 +12,7 @@ import (
 type Kubeconform struct {
 	// Kubeconform version to use for validation.
 	// +optional
-	// +default="v0.6.4"
+	// +default="v0.6.6"
 	Version string
 }
 
@@ -47,7 +47,7 @@ func (m *Kubeconform) Validate(
 
 	// Kubeconform version to use for validation.
 	// +optional
-	// +default="v0.6.4"
+	// +default="v0.6.6"
 	version string,
 
 	// Base directory to walk through in order to validate Kubernetes manifests.
