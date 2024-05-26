@@ -57,6 +57,10 @@ func (m *Kubeconform) Validate(
 	// +optional
 	kustomize bool,
 
+	// exclude is string listing directories or files to exclude from the validation separated by commas (example: "./terraform,.gitignore").
+	// +optional
+	exclude string,
+
 	// schemaDirs is a list of directories containing the CRDs to validate against.
 	// +optional
 	schemasDirs ...*Directory,
@@ -91,12 +95,10 @@ func (m *Kubeconform) Validate(
 set -e
 set -o pipefail
 
-exclude_dirs=()
-exclude_files=()
 kustomize=0
 manifests_dir="."
 
-options=$(getopt -o kd: --long kustomize,exclude-dirs:,exclude-files:,manifests-dir: -- "$@")
+options=$(getopt -o kd: --long kustomize,exclude:,manifests-dir: -- "$@")
 eval set -- "$options"
 
 while true; do
@@ -105,12 +107,8 @@ while true; do
       kustomize=1
       shift
       ;;
-    --exclude-dirs)
-      IFS=',' read -ra exclude_dirs <<< "$2"
-      shift 2
-      ;;
-    --exclude-files)
-      IFS=',' read -ra exclude_files <<< "$2"
+    --exclude)
+      exclude=$2
       shift 2
       ;;
     --manifests-dir|-d)
@@ -128,23 +126,29 @@ while true; do
   esac
 done
 
-generate_exclusions() {
-  local dirs=("$@")
-  local files=("${!#}")
-  local exclusions=""
+find_manifests() {
+  local dir=$1
+  local search_patterns=$2
+  local exclude_string=$3
+  local IFS=','
 
-  for dir in "${dirs[@]}"; do
-    exclusions+=" -o -path $dir"
-  done
-  for file in "${files[@]}"; do
-    exclusions+=" -o -name $file"
+  read -r -a pattern_array <<< "$search_patterns"
+  read -r -a exclude_array <<< "$exclude_string"
+
+  find_command="find $dir"
+
+  for exclude in "${exclude_array[@]}"; do
+    find_command+=" -path '${exclude// /}' -prune -o"
   done
 
-  exclusions=${exclusions:3}
-  echo "$exclusions"
+  find_command+=" \("
+  for pattern in "${pattern_array[@]}"; do
+    find_command+=" -name '${pattern// /}' -o"
+  done
+  find_command="${find_command% -o} \) -type f -print"
+
+  eval "$find_command"
 }
-
-exclusions=$(generate_exclusions "${exclude_dirs[@]}" "${exclude_files[@]}")
 
 ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
 EXTRA_SCHEMAS_LOCATIONS=( $(if [ -d //schemas ]; then find /schemas -mindepth 1 -maxdepth 1 -type d; fi) )
@@ -153,24 +157,22 @@ for dir in "${EXTRA_SCHEMAS_LOCATIONS[@]}"; do
 done
 
 if [ $kustomize -eq 1 ]; then
-  for file in $(find $manifests_dir -type f \( -name "kustomization.yaml" -o -name "kustomization.yml" \) -not \( $exclusions \)); do
+  for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
     echo "Processing kustomization file: $file"
-    kustomize build $(dirname $file) | /work/kubeconform ${ARGS[@]} -
-    if [ $? -eq 0 ]; then
-      echo "Validation successful for $file"
-    else
+    if ! kustomize build $(dirname $file) | /work/kubeconform ${ARGS[@]} -; then
       echo "Validation failed for $file"
       exit 1
     fi
+    echo "Validation successful for $file"
   done
 else
-  for file in $(find $manifests_dir -type f \( -name "*.yaml" -o -name "*.yml" \) -not \( $exclusions \)); do
+  for file in $(find_manifests "$manifests_dir" "*.yaml,*.yml" "$exclude"); do
     echo "Processing file: $file"
-    /work/kubeconform "${ARGS[@]}" $file
-    if [ $? -ne 0 ]; then
+    if ! /work/kubeconform "${ARGS[@]}" $file; then
       echo "Validation failed for $file"
       exit 1
     fi
+    echo "Validation successful for $file"
   done
 fi
 `
@@ -188,7 +190,14 @@ fi
 	}
 
 	// Execute the script
-	stdout, err = ctr.WithExec([]string{"bash", "/work/run_kubeconform.sh", "--exclude-dirs", "*/terraform,/.github"}).Stdout(ctx)
+	kubeconform_command := []string{"bash", "/work/run_kubeconform.sh"}
+	if kustomize {
+		kubeconform_command = append(kubeconform_command, "--kustomize")
+	}
+	if exclude != "" {
+		kubeconform_command = append(kubeconform_command, "--exclude", exclude)
+	}
+	stdout, err = ctr.WithExec(kubeconform_command).Stdout(ctx)
 	if err != nil {
 		return "", fmt.Errorf("validation failed: %v\n", err)
 	}
