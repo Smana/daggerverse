@@ -23,7 +23,7 @@ jobs:
       id: release
       uses: googleapis/release-please-action@v3
       with:
-        release-type: ${{ matrix.directory }}
+        release-type: simple
         path: ${{ matrix.directory }}
 
     - name: Construct Release Name
