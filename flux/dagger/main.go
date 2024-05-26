@@ -1,3 +1,5 @@
+// This module checks the validity of Kubernetes manifests in a given directory using kubeconform.
+
 package main
 
 import (
@@ -9,7 +11,7 @@ import (
 type Flux struct {
 	// Base directory to walk through in order to validate Kubernetes manifests.
 	// +default="."
-	Basedir *Directory
+	KustomizeDir *Directory
 
 	// Kubeconform version to use for validation.
 	// +default="v0.6.4"
@@ -20,21 +22,24 @@ func New(
 
 	// Base directory to walk through in order to validate Kubernetes manifests.
 	// +optional
-	basedir *Directory,
+	kustomizeDir *Directory,
 
 	// Kubeconform version to use for validation.
 	// +optional
 	// +default="v0.6.4"
 	kubeconformVersion string,
 ) *Flux {
-	if basedir == nil {
-		basedir = dag.Directory().Directory(".")
+	if kustomizeDir == nil {
+		kustomizeDir = dag.Directory().Directory(".")
 	}
 	if kubeconformVersion == "" {
 		kubeconformVersion = "v0.6.4"
 	}
+	if kustomizeDir == nil {
+		kustomizeDir = dag.Directory().Directory(".")
+	}
 	flux := &Flux{
-		Basedir:            basedir,
+		KustomizeDir:       kustomizeDir,
 		KubeconformVersion: kubeconformVersion,
 	}
 	return flux
@@ -77,7 +82,10 @@ func (f *Flux) Validate(
 	// +optional
 	// +default="v0.6.4"
 	kubeconformVersion string,
-	basedir *Directory,
+
+	kustomizeDir *Directory,
+
+	clustersDir *Directory,
 ) (string, error) {
 
 	kubeconformBin, err := extractFileFromURL(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", kubeconformVersion), "/usr/local/bin/kubeconform")
@@ -93,7 +101,8 @@ func (f *Flux) Validate(
 
 	return ctr.
 		WithWorkdir("/work").
-		WithMountedDirectory("/work", basedir).
+		WithMountedDirectory("/kustomize", f.KustomizeDir).
+		WithMountedDirectory("/clusters", clustersDir).
 		WithFile("/work/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
 		WithMountedDirectory("/flux-crd-schemas/master-standalone-strict", fluxSchemasDir).
 		WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
@@ -117,12 +126,12 @@ process_file() {
 export -f process_file
 
 echo -e "\n\e[32m✔\e[0m Validating Flux clusters manifests with kubeconform"
-for file in $(find ./clusters -type f -name "*.y*ml" ! \( -path "${excluded_directories[0]}" -o -path "${excluded_directories[1]}" -o -name "${ignored_files[0]}" -o -name "${ignored_files[1]}" \)); do
+for file in $(find /clusters -type f -name "*.y*ml" ! \( -path "${excluded_directories[0]}" -o -path "${excluded_directories[1]}" -o -name "${ignored_files[0]}" -o -name "${ignored_files[1]}" \)); do
   bash -c 'process_file "$0"' $file || exit 1
 done
 
 echo -e "\n\e[32m✔\e[0m Validating Kustomization manifests with kubeconform"
-for file in $(find . -type f -name "kustomization.yaml" ! \( -path "${excluded_directories[0]}" -o -path "${excluded_directories[1]}" -o -name "${ignored_files[0]}" -o -name "${ignored_files[1]}" \)); do
+for file in $(find /kustomize -type f -name "kustomization.yaml" ! \( -path "${excluded_directories[0]}" -o -path "${excluded_directories[1]}" -o -name "${ignored_files[0]}" -o -name "${ignored_files[1]}" \)); do
   echo "Processing kustomization.yaml file: $file"
   kustomize build $(dirname $file) | /work/kubeconform -strict -summary -ignore-missing-schemas -schema-location default --schema-location /flux-crd-schemas -
   if [ $? -ne 0 ]; then
