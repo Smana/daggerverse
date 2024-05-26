@@ -1,5 +1,5 @@
 {
-  "name": "flux",
+  "name": "kubeconform",
   "sdk": "go",
   "dependencies": [
     {
@@ -8,5 +8,5 @@
     }
   ],
   "source": "dagger",
-  "engineVersion": "v0.10.0"
+  "engineVersion": "v0.11.2"
 }
