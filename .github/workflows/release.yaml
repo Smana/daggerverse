@@ -3,10 +3,9 @@ name: Create Release
 on:
   push:
     branches:
-      - main
+      - "*" # Temporary for testing
 
 jobs:
-
   release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -25,6 +24,7 @@ jobs:
       with:
         release-type: simple
         path: ${{ matrix.directory }}
+        token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Construct Release Name
       id: ConstructReleaseName
