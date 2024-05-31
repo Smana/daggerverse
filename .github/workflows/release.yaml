@@ -23,4 +23,5 @@ jobs:
       uses: googleapis/release-please-action@v4
       with:
         path: ${{ matrix.directory }}
+        include-component-in-tag: true
         token: ${{ secrets.RELEASE_PLEASE_GITHUB_TOKEN }}
