@@ -5,7 +5,7 @@ This Dagger module provides a way to validate Kubernetes manifests using [kubeco
 ## Features
 
 - Validates Kubernetes manifests against the Kubernetes OpenAPI specification.
-- Supports both standalone YAML files and kustomization files.
+- Validates both standalone YAML files and kustomization files.
 - Allows excluding specific directories from validation.
 - Supports additional schemas located in the `/schemas` directory.
 

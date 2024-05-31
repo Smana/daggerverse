@@ -2,7 +2,8 @@
     "include-component-in-tag": true,
     "packages": {
         "kubeconform": {
-            "release-type": "simple"
+            "release-type": "simple",
+            "version-file": "kubeconform/VERSION"
         }
     }
 }
