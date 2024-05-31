@@ -1,0 +1,6 @@
+{
+    "kubeconform": {
+        "release-type": "simple",
+        "version": "0.1.0"
+    }
+}

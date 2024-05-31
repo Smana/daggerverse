@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     branches:
-      - "*" # Temporary for testing
+      - "main"
 
 jobs:
   release:
@@ -20,23 +20,7 @@ jobs:
 
     - name: Create Release
       id: release
-      uses: googleapis/release-please-action@v3
+      uses: googleapis/release-please-action@v4
       with:
-        release-type: simple
         path: ${{ matrix.directory }}
-        token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Construct Release Name
-      id: ConstructReleaseName
-      run: |
-        RELEASE_NAME="${{ matrix.directory }}/${{ steps.release.outputs.release-version }}"
-        echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_OUTPUT
-
-    - name: Create GitHub Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.release.outputs.release-version }}
-        release_name: ${{ steps.ConstructReleaseName.outputs.RELEASE_NAME }}
-        body: ${{ steps.release.outputs.release-notes }}
+        token: ${{ secrets.RELEASE_PLEASE_GITHUB_TOKEN }}
