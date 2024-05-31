@@ -1,3 +1,4 @@
 {
-    "/kubeconform": "0.1.0"
+    "/kubeconform": "0.1.0",
+    "kubeconform": "1.0.0"
 }
