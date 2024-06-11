@@ -38,9 +38,21 @@ type Kubeconform struct {
 	Version string
 }
 
-// baseImage returns a container image with the required packages
-func baseImage() (*Container, error) {
+// kubeConformImage returns a container image with the required packages and tools to run kubeconform.
+func kubeConformImage(kubeconform_version string) (*Container, error) {
 	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "yq"})
+
+	// Download the kubeconform archive and extract the binary into a dagger *File
+	kubeconformBin := dag.Arc().
+		Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", kubeconform_version)).
+			WithName("kubeconform-linux-amd64.tar.gz")).File("kubeconform-linux-amd64/kubeconform")
+
+	// Download the openapi2jsonschema.py script and return a dagger *File
+	openapi2jsonschemaScript := dag.HTTP("https://raw.githubusercontent.com/yannh/kubeconform/master/scripts/openapi2jsonschema.py")
+
+	ctr = ctr.
+		WithFile("/bin/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
+		WithFile("/bin/openapi2jsonschema.py", openapi2jsonschemaScript, ContainerWithFileOpts{Permissions: 0750})
 	return ctr, nil
 }
 
@@ -89,7 +101,9 @@ func isAnArchive(url string) (bool, error) {
 	return true, nil
 }
 
-// build a function that returns a list of dagger *Directories from provided URLs with crdURls
+//
+
+// schemasDirs creates a list of directories containing the CRDs schemas to validate against.
 func schemasDirs(crdURLs []string) ([]*Directory, error) {
 	var dirs []*Directory
 	for _, crdURL := range crdURLs {
@@ -150,12 +164,7 @@ func (m *Kubeconform) Validate(
 		manifests = dag.Directory().Directory(".")
 	}
 
-	// Download the kubeconform archive and extract the binary into a dagger *File
-	kubeconformBin := dag.Arc().
-		Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", version)).
-			WithName("kubeconform-linux-amd64.tar.gz")).File("kubeconform-linux-amd64/kubeconform")
-
-	ctr, err := baseImage()
+	ctr, err := kubeConformImage(version)
 	if err != nil {
 		return "", err
 	}
@@ -172,8 +181,7 @@ func (m *Kubeconform) Validate(
 
 	// Mount the manifests and kubeconform binary
 	ctr = ctr.WithMountedDirectory("/work", manifests).
-		WithWorkdir("/work").
-		WithFile("/work/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750})
+		WithWorkdir("/work")
 
 	// Create the script
 	scriptContent := `#!/bin/bash
@@ -244,7 +252,7 @@ done
 if [ $kustomize -eq 1 ]; then
   for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
     echo "Processing kustomization file: $file"
-    if ! kustomize build $(dirname $file) | /work/kubeconform ${ARGS[@]} -; then
+    if ! kustomize build $(dirname $file) | kubeconform ${ARGS[@]} -; then
       echo "Validation failed for $file"
       exit 1
     fi
@@ -253,7 +261,7 @@ if [ $kustomize -eq 1 ]; then
 else
   for file in $(find_manifests "$manifests_dir" "*.yaml,*.yml" "$exclude"); do
     echo "Processing file: $file"
-    if ! /work/kubeconform "${ARGS[@]}" $file; then
+    if ! kubeconform "${ARGS[@]}" $file; then
       echo "Validation failed for $file"
       exit 1
     fi
@@ -262,17 +270,13 @@ else
 fi
 `
 
-	// Add the script content to the container
-	ctr = ctr.WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
-		Permissions: 0750,
-		Contents:    scriptContent,
-	})
-
-	// Verify the script exists before running it
-	stdout, err := ctr.WithExec([]string{"ls", "-l", "/work/run_kubeconform.sh"}).Stdout(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to verify the script existence: %v", err)
-	}
+	// Add the manifests and the script to the container
+	ctr = ctr.
+		WithMountedDirectory("/work", manifests).
+		WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
+			Permissions: 0750,
+			Contents:    scriptContent,
+		})
 
 	// Execute the script
 	kubeconform_command := []string{"bash", "/work/run_kubeconform.sh"}
@@ -282,7 +286,7 @@ fi
 	if exclude != "" {
 		kubeconform_command = append(kubeconform_command, "--exclude", exclude)
 	}
-	stdout, err = ctr.WithExec(kubeconform_command).Stdout(ctx)
+	stdout, err := ctr.WithExec(kubeconform_command).Stdout(ctx)
 	if err != nil {
 		return "", fmt.Errorf("validation failed: %v\n", err)
 	}
