@@ -21,8 +21,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
 	"strconv"
+	"strings"
+
+	"github.com/mholt/archiver/v4"
 )
 
 type Kubeconform struct {
@@ -38,23 +44,82 @@ func baseImage() (*Container, error) {
 	return ctr, nil
 }
 
-// extractFileFromURL extracts a file from a given archive
-func extractFileFromURL(archiveURL string, filePath string) (*File, error) {
-	ctr, err := baseImage()
+func isGitRepo(target_url string) (bool, error) {
+	parsedURL, err := url.Parse(target_url)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
-	dag.Apko().Wolfi([]string{})
+	if parsedURL.Hostname() != "github.com" {
+		return false, nil
+	}
 
-	// retrieve basedir of the filePath into a variable binDir
-	fileDir := filepath.Dir(filePath)
+	pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+	if len(pathParts) >= 2 && pathParts[0] != "" && pathParts[1] != "" {
+		if len(pathParts) > 2 && (pathParts[2] == "blob" || pathParts[2] == "releases") {
+			return false, nil
+		}
+		return true, nil
+	}
 
-	return ctr.
-		WithWorkdir("/usr/local/bin").
-		WithFile("out.tgz", dag.HTTP(archiveURL)).
-		WithExec([]string{"tar", "-xvzf", "out.tgz", "-C", fileDir}).
-		File(filePath), nil
+	return false, nil
+}
+
+func isAnArchive(url string) (bool, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	_, input, err := archiver.Identify("", resp.Body)
+	if err != nil {
+		if err == archiver.ErrNoMatch {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Consume the remaining bytes from the input stream
+	_, err = io.Copy(io.Discard, input)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// build a function that returns a list of dagger *Directories from provided URLs with crdURls
+func schemasDirs(crdURLs []string) ([]*Directory, error) {
+	var dirs []*Directory
+	for _, crdURL := range crdURLs {
+		isRepo, err := isGitRepo(crdURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check if the URL is a git repository: %v", err)
+		}
+
+		// Depending on the URL format it will create a different directory
+		// If it is a git repository it will clone the repository and return the directory
+		// If it is an archive it will download the archive extract it and return the directory
+		// Otherwise, it will download the file and return the directory
+		if isRepo {
+			dir := dag.Git(crdURL).Commit("HASH").Tree()
+			dirs = append(dirs, dir)
+		} else {
+			isArchive, err := isAnArchive(crdURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check if the URL is an archive: %v", err)
+			}
+			if isArchive {
+				dir := dag.Arc().Unarchive(dag.HTTP(crdURL))
+				dirs = append(dirs, dir)
+			} else {
+				dir := dag.Directory().WithFile(path.Base(crdURL), dag.HTTP(crdURL))
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	return dirs, nil
 }
 
 // Validate the Kubernetes manifests in the provided directory and optional source CRDs directories
@@ -77,23 +142,27 @@ func (m *Kubeconform) Validate(
 	// +optional
 	exclude string,
 
-	// schemaDirs is a list of directories containing the CRDs to validate against.
+	// crds is a list of URLs containing the CRDs to validate against.
 	// +optional
-	schemasDirs ...*Directory,
+	crds []string,
 ) (string, error) {
 	if manifests == nil {
 		manifests = dag.Directory().Directory(".")
 	}
 
-	// Download and extract the kubeconform binary given the version
-	kubeconformBin, err := extractFileFromURL(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", version), "/usr/local/bin/kubeconform")
-	if err != nil {
-		return "", fmt.Errorf("cannot extract kubeconform binary: %v", err)
-	}
+	// Download the kubeconform archive and extract the binary into a dagger *File
+	kubeconformBin := dag.Arc().
+		Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", version)).
+			WithName("kubeconform-linux-amd64.tar.gz")).File("kubeconform-linux-amd64/kubeconform")
 
 	ctr, err := baseImage()
 	if err != nil {
 		return "", err
+	}
+
+	schemasDirs, err := schemasDirs(crds)
+	if err != nil {
+		return "", fmt.Errorf("failed to create the schemas directories: %v", err)
 	}
 
 	// Mount all the CRDs schemas directories into the container
