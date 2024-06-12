@@ -39,7 +39,7 @@ type Kubeconform struct {
 }
 
 // kubeConformImage returns a container image with the required packages and tools to run kubeconform.
-func kubeConformImage(kubeconform_version string) (*Container, error) {
+func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*Container, error) {
 	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq"}).
 		WithExec([]string{"pip", "install", "pyyaml"})
 
@@ -50,6 +50,24 @@ func kubeConformImage(kubeconform_version string) (*Container, error) {
 
 	// Download the openapi2jsonschema.py script and return a dagger *File
 	openapi2jsonschemaScript := dag.HTTP(fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubeconform/%s/scripts/openapi2jsonschema.py", kubeconform_version))
+
+	if flux {
+		// Download the fluxctl binary and return a dagger *File
+		fluxBin := dag.Arc().
+			Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/fluxcd/flux2/releases/download/v%s/flux_%s_linux_amd64.tar.gz", fluxVersion, fluxVersion)).
+				WithName(fmt.Sprintf("flux_%s_linux_amd64.tar.gz", fluxVersion))).File("flux")
+
+		ctr = ctr.WithFile("/bin/flux", fluxBin, ContainerWithFileOpts{Permissions: 0750})
+	}
+
+	// Add the environment variables to the container
+	for _, e := range env {
+		parts := strings.Split(e, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid flux variable format, must be in the form <key>:<value>: %s", e)
+		}
+		ctr = ctr.WithEnvVariable(parts[0], parts[1])
+	}
 
 	ctr = ctr.
 		WithFile("/bin/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
@@ -155,15 +173,29 @@ func (m *Kubeconform) Validate(
 	// +optional
 	exclude string,
 
+	// flux is a boolean that if set to true it will download the flux binary.
+	// +optional
+	// +default=false
+	flux bool,
+
+	// fluxVersion is the version of the flux binary to download.
+	// +optional
+	// +default="2.3.0"
+	fluxVersion string,
+
 	// crds is a list of URLs containing the CRDs to validate against.
 	// +optional
 	crds []string,
+
+	// a list of environment variables, expected in (key:value) format
+	// +optional
+	env []string,
 ) (string, error) {
 	if manifests == nil {
 		manifests = dag.Directory().Directory(".")
 	}
 
-	ctr, err := kubeConformImage(version)
+	ctr, err := kubeConformImage(version, flux, fluxVersion, env)
 	if err != nil {
 		return "", err
 	}
@@ -190,13 +222,17 @@ set -o pipefail
 kustomize=0
 manifests_dir="."
 
-options=$(getopt -o kd: --long kustomize,exclude:,manifests-dir: -- "$@")
+options=$(getopt -o kfd: --long kustomize,flux,exclude:,manifests-dir: -- "$@")
 eval set -- "$options"
 
 while true; do
   case $1 in
     --kustomize|-k)
       kustomize=1
+      shift
+      ;;
+    --flux|-f)
+      flux=1
       shift
       ;;
     --exclude)
@@ -262,9 +298,16 @@ fi
 if [ $kustomize -eq 1 ]; then
   for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
     echo "Processing kustomization file: $file"
-    if ! kustomize build $(dirname $file) | kubeconform ${ARGS[@]} -; then
-      echo "Validation failed for $file"
-      exit 1
+    if [ $flux -eq 1 ]; then
+        if ! kustomize build $(dirname $file) | flux envsubst | kubeconform ${ARGS[@]} -; then
+          echo "Validation failed for $file"
+          exit 1
+        fi
+    else
+        if ! kustomize build $(dirname $file) | kubeconform ${ARGS[@]} -; then
+        echo "Validation failed for $file"
+        exit 1
+        fi
     fi
     echo "Validation successful for $file"
   done
@@ -292,6 +335,9 @@ fi
 	kubeconform_command := []string{"bash", "/work/run_kubeconform.sh"}
 	if kustomize {
 		kubeconform_command = append(kubeconform_command, "--kustomize")
+	}
+	if flux {
+		kubeconform_command = append(kubeconform_command, "--flux")
 	}
 	if exclude != "" {
 		kubeconform_command = append(kubeconform_command, "--exclude", exclude)
