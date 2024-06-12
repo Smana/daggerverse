@@ -1,20 +1,22 @@
-// This Dagger moduleis designed to validate Kubernetes manifests using a tool called kubeconform.
+// This Dagger module is designed to validate Kubernetes manifests using a tool called kubeconform.
 //
-// kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It can be used to check if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) are valid according to the specification.
+// kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It checks if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) conform to the specification.
 //
-// What does this module exactly do?:
+// Here's what this module does:
 //
-// Directory specification: The module takes as input a directory containing Kubernetes manifests. This could be a single directory or a hierarchy of directories with multiple manifest files.
+// Directory specification: The module accepts a directory containing Kubernetes manifests as input. This can be a single directory or a hierarchy of directories with multiple manifest files.
 //
-// Manifest validation: For each manifest file in the specified directory, the module runs kubeconform to validate the resources in the file. This includes checking if the resources are valid Kubernetes resources, if they have all required fields, if the fields have valid values, etc.
+// Manifest validation: The module runs kubeconform for each manifest file in the specified directory. It validates the resources in the file, checking if they are valid Kubernetes resources, if they have all required fields, and if the field values are valid.
 //
-// Kustomization support: If the --kustomize option is provided, the module uses kustomize build to process kustomization files before validating them. Kustomization is a template-free way to customize application configuration, which simplifies the management of configuration files.
+// Kustomization support: If the --kustomize option is provided, the module processes kustomization files using kustomize build before validating them. Kustomization is a template-free method to customize application configuration, simplifying the management of configuration files.
 //
-// Exclusion of directories or files: The module supports excluding directories or files from validation using the --exclude option. This is useful if you have directories or files that you don't want to validate, such as test files, temporary files, etc.
+// Flux placeholder support: If the --flux option is provided, the module uses flux envsubst to substitute Flux placeholders in the manifests before validating them. This is useful when your manifests contain placeholders that are replaced by Flux at runtime.
 //
-// Additional schemas: The module supports additional schemas located in the /schemas directory. This is useful if you have custom resources that are not part of the standard Kubernetes API. You can add schemas for these resources to the /schemas directory, and kubeconform will use them during validation.
+// Exclusion of directories or files: The module can exclude directories or files from validation using the --exclude option. This is useful for excluding directories or files that should not be validated, such as test files or temporary files.
 //
-// Error handling: If kubeconform finds invalid resources, the module prints an error message and exits with a non-zero status. This allows the module to be used in scripts and CI/CD pipelines that need to fail when invalid resources are found.
+// Additional schemas: The module supports additional schemas located in the /schemas directory. This is useful for validating custom resources that are not part of the standard Kubernetes API. You can add schemas for these resources to the /schemas directory, and kubeconform will use them during validation.
+//
+// Error handling: If kubeconform identifies invalid resources, the module outputs an error message and exits with a non-zero status. This makes the module suitable for use in scripts and CI/CD pipelines that need to halt when invalid resources are detected.
 
 package main
 
