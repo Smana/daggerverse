@@ -40,7 +40,8 @@ type Kubeconform struct {
 
 // kubeConformImage returns a container image with the required packages and tools to run kubeconform.
 func kubeConformImage(kubeconform_version string) (*Container, error) {
-	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "yq"})
+	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq"}).
+		WithExec([]string{"pip", "install", "pyyaml"})
 
 	// Download the kubeconform archive and extract the binary into a dagger *File
 	kubeconformBin := dag.Arc().
@@ -48,7 +49,7 @@ func kubeConformImage(kubeconform_version string) (*Container, error) {
 			WithName("kubeconform-linux-amd64.tar.gz")).File("kubeconform-linux-amd64/kubeconform")
 
 	// Download the openapi2jsonschema.py script and return a dagger *File
-	openapi2jsonschemaScript := dag.HTTP("https://raw.githubusercontent.com/yannh/kubeconform/master/scripts/openapi2jsonschema.py")
+	openapi2jsonschemaScript := dag.HTTP(fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubeconform/%s/scripts/openapi2jsonschema.py", kubeconform_version))
 
 	ctr = ctr.
 		WithFile("/bin/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
@@ -101,10 +102,8 @@ func isAnArchive(url string) (bool, error) {
 	return true, nil
 }
 
-//
-
-// schemasDirs creates a list of directories containing the CRDs schemas to validate against.
-func schemasDirs(crdURLs []string) ([]*Directory, error) {
+// crdDirs creates a list of directories containing the CRDs schemas to validate against.
+func crdDirs(crdURLs []string) ([]*Directory, error) {
 	var dirs []*Directory
 	for _, crdURL := range crdURLs {
 		isRepo, err := isGitRepo(crdURL)
@@ -169,14 +168,14 @@ func (m *Kubeconform) Validate(
 		return "", err
 	}
 
-	schemasDirs, err := schemasDirs(crds)
+	crdDirs, err := crdDirs(crds)
 	if err != nil {
 		return "", fmt.Errorf("failed to create the schemas directories: %v", err)
 	}
 
 	// Mount all the CRDs schemas directories into the container
-	for idx, dir := range schemasDirs {
-		ctr = ctr.WithMountedDirectory(fmt.Sprintf("/schemas/%s", strconv.Itoa(idx)), dir)
+	for idx, dir := range crdDirs {
+		ctr = ctr.WithMountedDirectory(fmt.Sprintf("/crds/%s", strconv.Itoa(idx)), dir)
 	}
 
 	// Mount the manifests and kubeconform binary
@@ -243,11 +242,22 @@ find_manifests() {
   eval "$find_command"
 }
 
-ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
-EXTRA_SCHEMAS_LOCATIONS=( $(if [ -d //schemas ]; then find /schemas -mindepth 1 -maxdepth 1 -type d; fi) )
-for dir in "${EXTRA_SCHEMAS_LOCATIONS[@]}"; do
-  ARGS+=("--schema-location" "$dir")
+# Convert all CRDs to JSON schemas
+mkdir -p /schemas/master-standalone-strict
+find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d $'\0' file; do
+    if yq e '.kind == "CustomResourceDefinition"' "$file"; then
+        echo "Converting $file to JSON Schema"
+        openapi2jsonschema.py "$file"
+        mv ./*.json "/schemas/"
+    fi
 done
+
+ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
+
+# Add the schemas directories to the kubeconform arguments if they exist
+if [ -n "$(find $1 -type f -print -quit)" ]; then
+  ARGS+=("--schema-location" "/schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
+fi
 
 if [ $kustomize -eq 1 ]; then
   for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
