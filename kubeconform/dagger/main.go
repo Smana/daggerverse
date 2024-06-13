@@ -98,6 +98,28 @@ func isGitRepo(target_url string) (bool, error) {
 	return false, nil
 }
 
+// parseGitURL parses the GitHub URL to extract the repository URL, branch, and subdirectory
+func parseGitURL(gitURL string) (string, string, string, error) {
+	parsedURL, err := url.Parse(gitURL)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	parts := strings.Split(parsedURL.Path, "/")
+	if len(parts) < 5 {
+		return "", "", "", fmt.Errorf("invalid URL format")
+	}
+
+	owner := parts[1]
+	repo := parts[2]
+	branch := parts[4]
+	subdir := strings.Join(parts[5:], "/")
+
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
+
+	return repoURL, branch, subdir, nil
+}
+
 func isAnArchive(url string) (bool, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -136,15 +158,19 @@ func crdDirs(crdURLs []string) ([]*Directory, error) {
 		// If it is an archive it will download the archive extract it and return the directory
 		// Otherwise, it will download the file and return the directory
 		if isRepo {
-			dir := dag.Git(crdURL).Commit("HASH").Tree()
-			dirs = append(dirs, dir)
+			repoURL, branch, subdir, err := parseGitURL(crdURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse the git URL: %v", err)
+			}
+			dir := dag.Git(repoURL).Branch(branch).Tree()
+			dirs = append(dirs, dir.Directory(subdir))
 		} else {
 			isArchive, err := isAnArchive(crdURL)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check if the URL is an archive: %v", err)
 			}
 			if isArchive {
-				dir := dag.Arc().Unarchive(dag.HTTP(crdURL))
+				dir := dag.Arc().Unarchive(dag.HTTP(crdURL).WithName(path.Base(crdURL)))
 				dirs = append(dirs, dir)
 			} else {
 				dir := dag.Directory().WithFile(path.Base(crdURL), dag.HTTP(crdURL))
@@ -286,9 +312,9 @@ find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= re
     if yq e '.kind == "CustomResourceDefinition"' "$file"; then
         echo "Converting $file to JSON Schema"
         openapi2jsonschema.py "$file"
-        mv ./*.json "/schemas/"
     fi
 done
+mv ./*.json "/schemas/"
 
 ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
 
