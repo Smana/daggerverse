@@ -307,15 +307,16 @@ find_manifests() {
 }
 
 # Convert all CRDs to JSON schemas
-mkdir -p /schemas/master-standalone-strict
-find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d $'\0' file; do
+mkdir -p /schemas
+if [ -d /crds ]; then
+  find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d $'\0' file; do
     if yq e '.kind == "CustomResourceDefinition"' "$file"; then
-        echo "Converting $file to JSON Schema"
-        openapi2jsonschema.py "$file"
+      echo "Converting $file to JSON Schema"
+      openapi2jsonschema.py "$file"
     fi
-done
-mv ./*.json "/schemas/"
-
+  done
+  mv ./*.json "/schemas/"
+fi
 ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
 
 # Add the schemas directories to the kubeconform arguments if they exist
