@@ -1,28 +1,32 @@
-// This Dagger moduleis designed to validate Kubernetes manifests using a tool called kubeconform.
+// This Dagger module is designed to validate Kubernetes manifests using a tool called kubeconform.
 //
-// kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It can be used to check if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) are valid according to the specification.
+// kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It checks if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) conform to the specification.
 //
-// What does this module exactly do?:
+// - Validates standalone YAML files and kustomization files.
 //
-// Directory specification: The module takes as input a directory containing Kubernetes manifests. This could be a single directory or a hierarchy of directories with multiple manifest files.
+// - Excludes specific directories from validation.
 //
-// Manifest validation: For each manifest file in the specified directory, the module runs kubeconform to validate the resources in the file. This includes checking if the resources are valid Kubernetes resources, if they have all required fields, if the fields have valid values, etc.
+// - Converts CRDs into JSONSchemas.
 //
-// Kustomization support: If the --kustomize option is provided, the module uses kustomize build to process kustomization files before validating them. Kustomization is a template-free way to customize application configuration, which simplifies the management of configuration files.
+// - Supports additional schemas from the Datree Catalog
 //
-// Exclusion of directories or files: The module supports excluding directories or files from validation using the --exclude option. This is useful if you have directories or files that you don't want to validate, such as test files, temporary files, etc.
+// - Support Flux variables substitution.
 //
-// Additional schemas: The module supports additional schemas located in the /schemas directory. This is useful if you have custom resources that are not part of the standard Kubernetes API. You can add schemas for these resources to the /schemas directory, and kubeconform will use them during validation.
-//
-// Error handling: If kubeconform finds invalid resources, the module prints an error message and exits with a non-zero status. This allows the module to be used in scripts and CI/CD pipelines that need to fail when invalid resources are found.
+// Refer to the Readme for more information on how to use this module: https://github.com/Smana/daggerverse/tree/main/kubeconform
 
 package main
 
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
 	"strconv"
+	"strings"
+
+	"github.com/mholt/archiver/v4"
 )
 
 type Kubeconform struct {
@@ -32,29 +36,145 @@ type Kubeconform struct {
 	Version string
 }
 
-// baseImage returns a container image with the required packages
-func baseImage() (*Container, error) {
-	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "yq"})
+// kubeConformImage returns a container image with the required packages and tools to run kubeconform.
+func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*Container, error) {
+	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq"}).
+		WithExec([]string{"pip", "install", "pyyaml"})
+
+	// Download the kubeconform archive and extract the binary into a dagger *File
+	kubeconformBin := dag.Arc().
+		Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", kubeconform_version)).
+			WithName("kubeconform-linux-amd64.tar.gz")).File("kubeconform-linux-amd64/kubeconform")
+
+	// Download the openapi2jsonschema.py script and return a dagger *File
+	openapi2jsonschemaScript := dag.HTTP(fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubeconform/%s/scripts/openapi2jsonschema.py", kubeconform_version))
+
+	if flux {
+		// Add the flux binary to the container
+		fluxBin := dag.Arc().
+			Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/fluxcd/flux2/releases/download/v%s/flux_%s_linux_amd64.tar.gz", fluxVersion, fluxVersion)).
+				WithName(fmt.Sprintf("flux_%s_linux_amd64.tar.gz", fluxVersion))).File("flux")
+
+		ctr = ctr.WithFile("/bin/flux", fluxBin, ContainerWithFileOpts{Permissions: 0750})
+	}
+
+	// Add the environment variables to the container
+	for _, e := range env {
+		parts := strings.Split(e, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid flux variable format, must be in the form <key>:<value>: %s", e)
+		}
+		ctr = ctr.WithEnvVariable(parts[0], parts[1])
+	}
+
+	ctr = ctr.
+		WithFile("/bin/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
+		WithFile("/bin/openapi2jsonschema.py", openapi2jsonschemaScript, ContainerWithFileOpts{Permissions: 0750})
 	return ctr, nil
 }
 
-// extractFileFromURL extracts a file from a given archive
-func extractFileFromURL(archiveURL string, filePath string) (*File, error) {
-	ctr, err := baseImage()
+func isGitRepo(target_url string) (bool, error) {
+	parsedURL, err := url.Parse(target_url)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
-	dag.Apko().Wolfi([]string{})
+	if parsedURL.Hostname() != "github.com" {
+		return false, nil
+	}
 
-	// retrieve basedir of the filePath into a variable binDir
-	fileDir := filepath.Dir(filePath)
+	pathParts := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+	if len(pathParts) >= 2 && pathParts[0] != "" && pathParts[1] != "" {
+		if len(pathParts) > 2 && (pathParts[2] == "blob" || pathParts[2] == "releases") {
+			return false, nil
+		}
+		return true, nil
+	}
 
-	return ctr.
-		WithWorkdir("/usr/local/bin").
-		WithFile("out.tgz", dag.HTTP(archiveURL)).
-		WithExec([]string{"tar", "-xvzf", "out.tgz", "-C", fileDir}).
-		File(filePath), nil
+	return false, nil
+}
+
+// parseGitURL parses the GitHub URL to extract the repository URL, branch, and subdirectory
+func parseGitURL(gitURL string) (string, string, string, error) {
+	parsedURL, err := url.Parse(gitURL)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	parts := strings.Split(parsedURL.Path, "/")
+	if len(parts) < 5 {
+		return "", "", "", fmt.Errorf("invalid URL format")
+	}
+
+	owner := parts[1]
+	repo := parts[2]
+	branch := parts[4]
+	subdir := strings.Join(parts[5:], "/")
+
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
+
+	return repoURL, branch, subdir, nil
+}
+
+func isAnArchive(url string) (bool, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	_, input, err := archiver.Identify("", resp.Body)
+	if err != nil {
+		if err == archiver.ErrNoMatch {
+			return false, nil
+		}
+		return false, err
+	}
+
+	// Consume the remaining bytes from the input stream
+	_, err = io.Copy(io.Discard, input)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// crdDirs creates a list of directories containing the CRDs schemas to validate against.
+func crdDirs(crdURLs []string) ([]*Directory, error) {
+	var dirs []*Directory
+	for _, crdURL := range crdURLs {
+		isRepo, err := isGitRepo(crdURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check if the URL is a git repository: %v", err)
+		}
+
+		// Depending on the URL format it will create a different directory
+		// If it is a git repository it will clone the repository and return the directory
+		// If it is an archive it will download the archive extract it and return the directory
+		// Otherwise, it will download the file and return the directory
+		if isRepo {
+			repoURL, branch, subdir, err := parseGitURL(crdURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse the git URL: %v", err)
+			}
+			dir := dag.Git(repoURL).Branch(branch).Tree()
+			dirs = append(dirs, dir.Directory(subdir))
+		} else {
+			isArchive, err := isAnArchive(crdURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check if the URL is an archive: %v", err)
+			}
+			if isArchive {
+				dir := dag.Arc().Unarchive(dag.HTTP(crdURL).WithName(path.Base(crdURL)))
+				dirs = append(dirs, dir)
+			} else {
+				dir := dag.Directory().WithFile(path.Base(crdURL), dag.HTTP(crdURL))
+				dirs = append(dirs, dir)
+			}
+		}
+	}
+	return dirs, nil
 }
 
 // Validate the Kubernetes manifests in the provided directory and optional source CRDs directories
@@ -77,34 +197,51 @@ func (m *Kubeconform) Validate(
 	// +optional
 	exclude string,
 
-	// schemaDirs is a list of directories containing the CRDs to validate against.
+	// catalog is a boolean that if set to true it will use the Datree catalog to validate the manifests. (ref: https://github.com/datreeio/CRDs-catalog)
 	// +optional
-	schemasDirs ...*Directory,
+	// +default=false
+	catalog bool,
+
+	// flux is a boolean that if set to true it will download the flux binary.
+	// +optional
+	// +default=false
+	flux bool,
+
+	// fluxVersion is the version of the flux binary to download.
+	// +optional
+	// +default="2.3.0"
+	fluxVersion string,
+
+	// crds is a list of URLs containing the CRDs to validate against.
+	// +optional
+	crds []string,
+
+	// a list of environment variables, expected in (key:value) format
+	// +optional
+	env []string,
 ) (string, error) {
 	if manifests == nil {
 		manifests = dag.Directory().Directory(".")
 	}
 
-	// Download and extract the kubeconform binary given the version
-	kubeconformBin, err := extractFileFromURL(fmt.Sprintf("https://github.com/yannh/kubeconform/releases/download/%s/kubeconform-linux-amd64.tar.gz", version), "/usr/local/bin/kubeconform")
-	if err != nil {
-		return "", fmt.Errorf("cannot extract kubeconform binary: %v", err)
-	}
-
-	ctr, err := baseImage()
+	ctr, err := kubeConformImage(version, flux, fluxVersion, env)
 	if err != nil {
 		return "", err
 	}
 
+	crdDirs, err := crdDirs(crds)
+	if err != nil {
+		return "", fmt.Errorf("failed to create the schemas directories: %v", err)
+	}
+
 	// Mount all the CRDs schemas directories into the container
-	for idx, dir := range schemasDirs {
-		ctr = ctr.WithMountedDirectory(fmt.Sprintf("/schemas/%s", strconv.Itoa(idx)), dir)
+	for idx, dir := range crdDirs {
+		ctr = ctr.WithMountedDirectory(fmt.Sprintf("/crds/%s", strconv.Itoa(idx)), dir)
 	}
 
 	// Mount the manifests and kubeconform binary
 	ctr = ctr.WithMountedDirectory("/work", manifests).
-		WithWorkdir("/work").
-		WithFile("/work/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750})
+		WithWorkdir("/work")
 
 	// Create the script
 	scriptContent := `#!/bin/bash
@@ -114,13 +251,21 @@ set -o pipefail
 kustomize=0
 manifests_dir="."
 
-options=$(getopt -o kd: --long kustomize,exclude:,manifests-dir: -- "$@")
+options=$(getopt -o kd: --long kustomize,flux,catalog,exclude:,manifests-dir: -- "$@")
 eval set -- "$options"
 
 while true; do
   case $1 in
     --kustomize|-k)
       kustomize=1
+      shift
+      ;;
+    --flux)
+      flux=1
+      shift
+      ;;
+    --catalog)
+      catalog=1
       shift
       ;;
     --exclude)
@@ -166,25 +311,47 @@ find_manifests() {
   eval "$find_command"
 }
 
-ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
-EXTRA_SCHEMAS_LOCATIONS=( $(if [ -d //schemas ]; then find /schemas -mindepth 1 -maxdepth 1 -type d; fi) )
-for dir in "${EXTRA_SCHEMAS_LOCATIONS[@]}"; do
-  ARGS+=("--schema-location" "$dir")
+# Convert all CRDs to JSON schemas
+mkdir -p /schemas
+find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d $'\0' file; do
+    if yq e '.kind == "CustomResourceDefinition"' "$file"; then
+        echo "Converting $file to JSON Schema"
+        openapi2jsonschema.py "$file"
+    fi
 done
+mv ./*.json "/schemas/"
+
+ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
+
+# Add the schemas directories to the kubeconform arguments if they exist
+if [ -n "$(find $1 -type f -print -quit)" ]; then
+  ARGS+=("--schema-location" "/schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
+fi
+# Add the Datree catalog if enabled
+if [ $catalog -eq 1 ]; then
+  ARGS+=("--schema-location" "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
+fi
 
 if [ $kustomize -eq 1 ]; then
   for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
     echo "Processing kustomization file: $file"
-    if ! kustomize build $(dirname $file) | /work/kubeconform ${ARGS[@]} -; then
-      echo "Validation failed for $file"
-      exit 1
+    if [ $flux -eq 1 ]; then
+        if ! kustomize build $(dirname $file) | flux envsubst | kubeconform ${ARGS[@]} -; then
+          echo "Validation failed for $file"
+          exit 1
+        fi
+    else
+        if ! kustomize build $(dirname $file) | kubeconform ${ARGS[@]} -; then
+        echo "Validation failed for $file"
+        exit 1
+        fi
     fi
     echo "Validation successful for $file"
   done
 else
   for file in $(find_manifests "$manifests_dir" "*.yaml,*.yml" "$exclude"); do
     echo "Processing file: $file"
-    if ! /work/kubeconform "${ARGS[@]}" $file; then
+    if ! kubeconform "${ARGS[@]}" $file; then
       echo "Validation failed for $file"
       exit 1
     fi
@@ -193,27 +360,29 @@ else
 fi
 `
 
-	// Add the script content to the container
-	ctr = ctr.WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
-		Permissions: 0750,
-		Contents:    scriptContent,
-	})
-
-	// Verify the script exists before running it
-	stdout, err := ctr.WithExec([]string{"ls", "-l", "/work/run_kubeconform.sh"}).Stdout(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to verify the script existence: %v", err)
-	}
+	// Add the manifests and the script to the container
+	ctr = ctr.
+		WithMountedDirectory("/work", manifests).
+		WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
+			Permissions: 0750,
+			Contents:    scriptContent,
+		})
 
 	// Execute the script
 	kubeconform_command := []string{"bash", "/work/run_kubeconform.sh"}
 	if kustomize {
 		kubeconform_command = append(kubeconform_command, "--kustomize")
 	}
+	if flux {
+		kubeconform_command = append(kubeconform_command, "--flux")
+	}
+	if catalog {
+		kubeconform_command = append(kubeconform_command, "--catalog")
+	}
 	if exclude != "" {
 		kubeconform_command = append(kubeconform_command, "--exclude", exclude)
 	}
-	stdout, err = ctr.WithExec(kubeconform_command).Stdout(ctx)
+	stdout, err := ctr.WithExec(kubeconform_command).Stdout(ctx)
 	if err != nil {
 		return "", fmt.Errorf("validation failed: %v\n", err)
 	}
