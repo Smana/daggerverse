@@ -2,21 +2,17 @@
 //
 // kubeconform is a tool that validates Kubernetes resources against the Kubernetes OpenAPI specification. It checks if Kubernetes manifests (YAML or JSON files containing Kubernetes resources) conform to the specification.
 //
-// Here's what this module does:
+// - Validates standalone YAML files and kustomization files.
 //
-// Directory specification: The module accepts a directory containing Kubernetes manifests as input. This can be a single directory or a hierarchy of directories with multiple manifest files.
+// - Excludes specific directories from validation.
 //
-// Manifest validation: The module runs kubeconform for each manifest file in the specified directory. It validates the resources in the file, checking if they are valid Kubernetes resources, if they have all required fields, and if the field values are valid.
+// - Converts CRDs into JSONSchemas.
 //
-// Kustomization support: If the --kustomize option is provided, the module processes kustomization files using kustomize build before validating them. Kustomization is a template-free method to customize application configuration, simplifying the management of configuration files.
+// - Supports additional schemas from the Datree Catalog
 //
-// Flux placeholder support: If the --flux option is provided, the module uses flux envsubst to substitute Flux placeholders in the manifests before validating them. This is useful when your manifests contain placeholders that are replaced by Flux at runtime.
+// - Support Flux variables substitution.
 //
-// Exclusion of directories or files: The module can exclude directories or files from validation using the --exclude option. This is useful for excluding directories or files that should not be validated, such as test files or temporary files.
-//
-// Additional schemas: The module supports additional schemas located in the /schemas directory. This is useful for validating custom resources that are not part of the standard Kubernetes API. You can add schemas for these resources to the /schemas directory, and kubeconform will use them during validation.
-//
-// Error handling: If kubeconform identifies invalid resources, the module outputs an error message and exits with a non-zero status. This makes the module suitable for use in scripts and CI/CD pipelines that need to halt when invalid resources are detected.
+// Refer to the Readme for more information on how to use this module: https://github.com/Smana/daggerverse/tree/main/kubeconform
 
 package main
 
@@ -54,7 +50,7 @@ func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string,
 	openapi2jsonschemaScript := dag.HTTP(fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubeconform/%s/scripts/openapi2jsonschema.py", kubeconform_version))
 
 	if flux {
-		// Download the fluxctl binary and return a dagger *File
+		// Add the flux binary to the container
 		fluxBin := dag.Arc().
 			Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/fluxcd/flux2/releases/download/v%s/flux_%s_linux_amd64.tar.gz", fluxVersion, fluxVersion)).
 				WithName(fmt.Sprintf("flux_%s_linux_amd64.tar.gz", fluxVersion))).File("flux")
@@ -201,6 +197,11 @@ func (m *Kubeconform) Validate(
 	// +optional
 	exclude string,
 
+	// catalog is a boolean that if set to true it will use the Datree catalog to validate the manifests. (ref: https://github.com/datreeio/CRDs-catalog)
+	// +optional
+	// +default=false
+	catalog bool,
+
 	// flux is a boolean that if set to true it will download the flux binary.
 	// +optional
 	// +default=false
@@ -250,7 +251,7 @@ set -o pipefail
 kustomize=0
 manifests_dir="."
 
-options=$(getopt -o kfd: --long kustomize,flux,exclude:,manifests-dir: -- "$@")
+options=$(getopt -o kd: --long kustomize,flux,catalog,exclude:,manifests-dir: -- "$@")
 eval set -- "$options"
 
 while true; do
@@ -259,8 +260,12 @@ while true; do
       kustomize=1
       shift
       ;;
-    --flux|-f)
+    --flux)
       flux=1
+      shift
+      ;;
+    --catalog)
+      catalog=1
       shift
       ;;
     --exclude)
@@ -307,7 +312,7 @@ find_manifests() {
 }
 
 # Convert all CRDs to JSON schemas
-mkdir -p /schemas/master-standalone-strict
+mkdir -p /schemas
 find /crds -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d $'\0' file; do
     if yq e '.kind == "CustomResourceDefinition"' "$file"; then
         echo "Converting $file to JSON Schema"
@@ -321,6 +326,10 @@ ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "defaul
 # Add the schemas directories to the kubeconform arguments if they exist
 if [ -n "$(find $1 -type f -print -quit)" ]; then
   ARGS+=("--schema-location" "/schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
+fi
+# Add the Datree catalog if enabled
+if [ $catalog -eq 1 ]; then
+  ARGS+=("--schema-location" "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
 fi
 
 if [ $kustomize -eq 1 ]; then
@@ -366,6 +375,9 @@ fi
 	}
 	if flux {
 		kubeconform_command = append(kubeconform_command, "--flux")
+	}
+	if catalog {
+		kubeconform_command = append(kubeconform_command, "--catalog")
 	}
 	if exclude != "" {
 		kubeconform_command = append(kubeconform_command, "--exclude", exclude)
