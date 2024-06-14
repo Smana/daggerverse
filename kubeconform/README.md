@@ -15,7 +15,7 @@ This Dagger module validates Kubernetes manifests using [kubeconform](https://gi
 ### Basic Usage
 
 ```bash
-dagger call validate --manifests /path/to/your/manifests --exclude "./exclude/dir1,./exclude/file1"
+dagger call -m github.com/Smana/daggerverse/kubeconform@v0.0.4 validate --manifests /path/to/your/manifests --exclude "./exclude/dir1,./exclude/file1"
 ```
 
 Replace /path/to/your/manifests with the path to your Kubernetes manifests.
@@ -26,7 +26,7 @@ Replace /path/to/your/manifests with the path to your Kubernetes manifests.
 If you're using [**flux**](https://github.com/fluxcd/flux2) variables substitution, you can add environment variables:
 
 ```bash
-dagger call validate --manifests /path/to/your/manifests \
+dagger call -m github.com/Smana/daggerverse/kubeconform@v0.0.4 validate --manifests /path/to/your/manifests \
 --crds https://github.com/kubernetes-sigs/gateway-api/tree/main/config/crd,https://github.com/external-secrets/external-secrets/tree/main/config/crds/bases \
 --exclude ".github/*" --kustomize --env "domain_name:cluster.local,cluster_name:foobar,region:eu-west-3" --flux
 ```
@@ -34,14 +34,14 @@ dagger call validate --manifests /path/to/your/manifests \
 You can also use the Datree catalog, which contains commonly used custom resources JSONSchemas:
 
 ```bash
-dagger call validate --manifests /path/to/your/manifests --catalog
+dagger call -m github.com/Smana/daggerverse/kubeconform@v0.0.4 validate --manifests /path/to/your/manifests --catalog
 ```
 
 
 This module handles **any CRDs**. You can provide an HTTP URL pointing to a git directory, a tarball, or a direct link. The module will **convert** these CRDs to JSONSchemas:
 
 ```bash
-dagger call validate --manifests /path/to/your/manifests \
+dagger call -m github.com/Smana/daggerverse/kubeconform@v0.0.4 validate --manifests /path/to/your/manifests \
 --crds https://github.com/kubernetes-sigs/gateway-api/tree/main/config/crd,http://another.crd.url
 ```
 
