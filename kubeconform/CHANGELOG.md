@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Smana/daggerverse/compare/v0.3.0...v0.4.0) (2024-07-21)
+
+
+### Features
+
+* **kuebconform:** update to dagger v0.12.x ([#34](https://github.com/Smana/daggerverse/issues/34)) ([6a0108f](https://github.com/Smana/daggerverse/commit/6a0108f59afb7ec0af5f896d64c0988fca0c022d))
+
 ## [0.3.0](https://github.com/Smana/daggerverse/compare/v0.2.1...v0.3.0) (2024-06-14)
 
 
