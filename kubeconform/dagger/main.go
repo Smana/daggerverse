@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"dagger/kubeconform/internal/dagger"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,7 +38,7 @@ type Kubeconform struct {
 }
 
 // kubeConformImage returns a container image with the required packages and tools to run kubeconform.
-func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*Container, error) {
+func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*dagger.Container, error) {
 	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq"}).
 		WithExec([]string{"pip", "install", "pyyaml"})
 
@@ -55,7 +56,7 @@ func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string,
 			Unarchive(dag.HTTP(fmt.Sprintf("https://github.com/fluxcd/flux2/releases/download/v%s/flux_%s_linux_amd64.tar.gz", fluxVersion, fluxVersion)).
 				WithName(fmt.Sprintf("flux_%s_linux_amd64.tar.gz", fluxVersion))).File("flux")
 
-		ctr = ctr.WithFile("/bin/flux", fluxBin, ContainerWithFileOpts{Permissions: 0750})
+		ctr = ctr.WithFile("/bin/flux", fluxBin, dagger.ContainerWithFileOpts{Permissions: 0750})
 	}
 
 	// Add the environment variables to the container
@@ -68,8 +69,8 @@ func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string,
 	}
 
 	ctr = ctr.
-		WithFile("/bin/kubeconform", kubeconformBin, ContainerWithFileOpts{Permissions: 0750}).
-		WithFile("/bin/openapi2jsonschema.py", openapi2jsonschemaScript, ContainerWithFileOpts{Permissions: 0750})
+		WithFile("/bin/kubeconform", kubeconformBin, dagger.ContainerWithFileOpts{Permissions: 0750}).
+		WithFile("/bin/openapi2jsonschema.py", openapi2jsonschemaScript, dagger.ContainerWithFileOpts{Permissions: 0750})
 	return ctr, nil
 }
 
@@ -141,8 +142,8 @@ func isAnArchive(url string) (bool, error) {
 }
 
 // crdDirs creates a list of directories containing the CRDs schemas to validate against.
-func crdDirs(crdURLs []string) ([]*Directory, error) {
-	var dirs []*Directory
+func crdDirs(crdURLs []string) ([]*dagger.Directory, error) {
+	var dirs []*dagger.Directory
 	for _, crdURL := range crdURLs {
 		isRepo, err := isGitRepo(crdURL)
 		if err != nil {
@@ -187,7 +188,7 @@ func (m *Kubeconform) Validate(
 	version string,
 
 	// Base directory to walk through in order to validate Kubernetes manifests.
-	manifests *Directory,
+	manifests *dagger.Directory,
 
 	// kustomize if set to true it will look for kustomization.yaml files and validate them otherwise it will validate all the YAML files in the directory.
 	// +optional
@@ -365,11 +366,7 @@ fi
 	// Add the manifests and the script to the container
 	ctr = ctr.
 		WithMountedDirectory("/work", manifests).
-		WithNewFile("/work/run_kubeconform.sh", ContainerWithNewFileOpts{
-			Permissions: 0750,
-			Contents:    scriptContent,
-		})
-
+		WithNewFile("/work/run_kubeconform.sh", scriptContent, dagger.ContainerWithNewFileOpts{Permissions: 0750})
 	// Execute the script
 	kubeconform_command := []string{"bash", "/work/run_kubeconform.sh"}
 	if kustomize {
