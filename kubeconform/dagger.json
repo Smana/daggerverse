@@ -3,14 +3,14 @@
   "sdk": "go",
   "dependencies": [
     {
-      "name": "arc",
-      "source": "github.com/sagikazarmark/daggerverse/arc@b45dbd7448bb967aca4a538af9ce7f042abf0316"
-    },
-    {
       "name": "apko",
       "source": "github.com/vito/daggerverse/apko@dd441abffabb98405c6ba74f9fde6a62ecaea81a"
+    },
+    {
+      "name": "arc",
+      "source": "github.com/sagikazarmark/daggerverse/arc@b45dbd7448bb967aca4a538af9ce7f042abf0316"
     }
   ],
   "source": "dagger",
-  "engineVersion": "v0.11.2"
+  "engineVersion": "v0.12.1"
 }
