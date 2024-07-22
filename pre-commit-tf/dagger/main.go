@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"dagger/pre-commit-tf/internal/dagger"
 	"fmt"
 )
 
@@ -27,7 +28,7 @@ func (m *PreCommitTf) Run(
 	version string,
 
 	// Directory to run pre-commit-terraform in
-	dir *Directory,
+	dir *dagger.Directory,
 
 	// Choose between "terraform" or "tofu"
 	// +optional
@@ -36,7 +37,7 @@ func (m *PreCommitTf) Run(
 
 	// cache is a directory to use as a cache for Terraform plugins
 	// +optional
-	cache_dir *Directory,
+	cache_dir *dagger.Directory,
 ) (string, error) {
 
 	ctr := dag.Container().
@@ -51,6 +52,6 @@ func (m *PreCommitTf) Run(
 	return ctr.WithEnvVariable("PCT_TFPATH=", tfBinary).
 		WithMountedDirectory("/mnt", dir).
 		WithWorkdir("/mnt").
-		WithExec([]string{"run", "-a"}).
+		WithExec([]string{"pre-commit", "run", "-a"}).
 		Stdout(ctx)
 }
