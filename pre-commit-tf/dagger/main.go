@@ -24,7 +24,7 @@ func (m *PreCommitTf) Run(
 
 	// Version of pre-commit-terraform to run
 	// +optional
-	// +default="v1.92.0"
+	// +default="v1.94.1"
 	version string,
 
 	// Directory to run pre-commit-terraform in
@@ -49,7 +49,7 @@ func (m *PreCommitTf) Run(
 			WithEnvVariable("TF_PLUGIN_CACHE_DIR", "/tf_cache")
 	}
 
-	return ctr.WithEnvVariable("PCT_TFPATH=", tfBinary).
+	return ctr.WithEnvVariable("PCT_TFPATH", tfBinary).
 		WithMountedDirectory("/mnt", dir).
 		WithWorkdir("/mnt").
 		WithExec([]string{"pre-commit", "run", "-a"}).
