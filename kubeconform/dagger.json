@@ -1,16 +1,18 @@
 {
   "name": "kubeconform",
+  "engineVersion": "v0.14.0",
   "sdk": "go",
   "dependencies": [
     {
       "name": "apko",
-      "source": "github.com/vito/daggerverse/apko@dd441abffabb98405c6ba74f9fde6a62ecaea81a"
+      "source": "github.com/vito/daggerverse/apko@dd441abffabb98405c6ba74f9fde6a62ecaea81a",
+      "pin": "dd441abffabb98405c6ba74f9fde6a62ecaea81a"
     },
     {
       "name": "arc",
-      "source": "github.com/sagikazarmark/daggerverse/arc@b45dbd7448bb967aca4a538af9ce7f042abf0316"
+      "source": "github.com/sagikazarmark/daggerverse/arc@arc/v0.5.0",
+      "pin": "126b5fbbdad70dbf2a8689600baec2eb78c05ef4"
     }
   ],
-  "source": "dagger",
-  "engineVersion": "v0.12.1"
+  "source": "dagger"
 }
