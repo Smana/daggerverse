@@ -184,12 +184,10 @@ func (m *Kubeconform) Validate(
 
 	// Kubeconform version to use for validation.
 	// +optional
-	// +default="v0.6.6"
+	// +default="v0.6.7"
 	version string,
 
 	// Base directory to walk through in order to validate Kubernetes manifests.
-	// +defaultPath="."
-	// +optional
 	manifests *dagger.Directory,
 
 	// kustomize if set to true it will look for kustomization.yaml files and validate them otherwise it will validate all the YAML files in the directory.
