@@ -20,20 +20,19 @@ import (
 	"context"
 	"dagger/kubeconform/internal/dagger"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 )
 
 type Kubeconform struct {
 	// Kubeconform version to use for validation.
 	// +optional
-	// +default="v0.6.6"
+	// +default="v0.6.7"
 	Version string
 }
 
@@ -117,32 +116,33 @@ func parseGitURL(gitURL string) (string, string, string, error) {
 	return repoURL, branch, subdir, nil
 }
 
-func isAnArchive(url string) (bool, error) {
+func isAnArchive(ctx context.Context, url string) (bool, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
 
-	_, input, err := archiver.Identify("", resp.Body)
-	if err != nil {
-		if err == archiver.ErrNoMatch {
-			return false, nil
-		}
-		return false, err
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("received non-200 status: %s", resp.Status)
 	}
 
-	// Consume the remaining bytes from the input stream
-	_, err = io.Copy(io.Discard, input)
+	// Identify the archive format
+	format, _, err := archives.Identify(ctx, url, resp.Body)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to identify archive format: %w", err)
 	}
 
-	return true, nil
+	// Check if the identified format is an extractor
+	if _, ok := format.(archives.Extractor); ok {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // crdDirs creates a list of directories containing the CRDs schemas to validate against.
-func crdDirs(crdURLs []string) ([]*dagger.Directory, error) {
+func crdDirs(ctx context.Context, crdURLs []string) ([]*dagger.Directory, error) {
 	var dirs []*dagger.Directory
 	for _, crdURL := range crdURLs {
 		isRepo, err := isGitRepo(crdURL)
@@ -162,7 +162,7 @@ func crdDirs(crdURLs []string) ([]*dagger.Directory, error) {
 			dir := dag.Git(repoURL).Branch(branch).Tree()
 			dirs = append(dirs, dir.Directory(subdir))
 		} else {
-			isArchive, err := isAnArchive(crdURL)
+			isArchive, err := isAnArchive(ctx, crdURL)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check if the URL is an archive: %v", err)
 			}
@@ -188,6 +188,8 @@ func (m *Kubeconform) Validate(
 	version string,
 
 	// Base directory to walk through in order to validate Kubernetes manifests.
+	// +defaultPath="."
+	// +optional
 	manifests *dagger.Directory,
 
 	// kustomize if set to true it will look for kustomization.yaml files and validate them otherwise it will validate all the YAML files in the directory.
@@ -230,7 +232,7 @@ func (m *Kubeconform) Validate(
 		return "", err
 	}
 
-	crdDirs, err := crdDirs(crds)
+	crdDirs, err := crdDirs(ctx, crds)
 	if err != nil {
 		return "", fmt.Errorf("failed to create the schemas directories: %v", err)
 	}
