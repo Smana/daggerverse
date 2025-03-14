@@ -38,8 +38,8 @@ type Kubeconform struct {
 
 // kubeConformImage returns a container image with the required packages and tools to run kubeconform.
 func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*dagger.Container, error) {
-	ctr := dag.Apko().Wolfi([]string{"bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq"}).
-		WithExec([]string{"pip", "install", "pyyaml"})
+	ctr := dag.Container().From("alpine:3.14").
+		WithExec([]string{"apk", "add", "bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq", "py3-yaml"})
 
 	// Download the kubeconform archive and extract the binary into a dagger *File
 	kubeconformBin := dag.Arc().
@@ -210,7 +210,7 @@ func (m *Kubeconform) Validate(
 
 	// fluxVersion is the version of the flux binary to download.
 	// +optional
-	// +default="2.3.0"
+	// +default="2.5.1"
 	fluxVersion string,
 
 	// crds is a list of URLs containing the CRDs to validate against.
@@ -383,7 +383,7 @@ fi
 	}
 	stdout, err := ctr.WithExec(kubeconform_command).Stdout(ctx)
 	if err != nil {
-		return "", fmt.Errorf("validation failed: %v\n", err)
+		return "", fmt.Errorf("validation failed: %v", err)
 	}
 
 	return stdout, nil

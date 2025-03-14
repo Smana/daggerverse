@@ -1,13 +1,10 @@
 {
   "name": "kubeconform",
-  "engineVersion": "v0.14.0",
-  "sdk": "go",
+  "engineVersion": "v0.16.3",
+  "sdk": {
+    "source": "go"
+  },
   "dependencies": [
-    {
-      "name": "apko",
-      "source": "github.com/vito/daggerverse/apko@dd441abffabb98405c6ba74f9fde6a62ecaea81a",
-      "pin": "dd441abffabb98405c6ba74f9fde6a62ecaea81a"
-    },
     {
       "name": "arc",
       "source": "github.com/sagikazarmark/daggerverse/arc@arc/v0.5.0",
