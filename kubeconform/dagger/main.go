@@ -38,7 +38,7 @@ type Kubeconform struct {
 
 // kubeConformImage returns a container image with the required packages and tools to run kubeconform.
 func kubeConformImage(kubeconform_version string, flux bool, fluxVersion string, env []string) (*dagger.Container, error) {
-	ctr := dag.Container().From("alpine:latest").
+	ctr := dag.Container().From("alpine:3.14").
 		WithExec([]string{"apk", "add", "bash", "curl", "kustomize", "git", "python3", "py3-pip", "yq", "py3-yaml"})
 
 	// Download the kubeconform archive and extract the binary into a dagger *File
