@@ -24,7 +24,7 @@ func (m *PreCommitTf) Run(
 
 	// Version of pre-commit-terraform to run
 	// +optional
-	// +default="v1.94.1"
+	// +default="v1.99.0"
 	version string,
 
 	// Directory to run pre-commit-terraform in

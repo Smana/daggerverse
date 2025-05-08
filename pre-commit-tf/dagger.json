@@ -1,6 +1,8 @@
 {
   "name": "pre-commit-tf",
-  "sdk": "go",
-  "source": "dagger",
-  "engineVersion": "v0.12.1"
+  "engineVersion": "v0.18.6",
+  "sdk": {
+    "source": "go"
+  },
+  "source": "dagger"
 }
