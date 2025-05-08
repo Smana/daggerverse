@@ -10,7 +10,7 @@ Here's an example of the pre-commit configuration
 ```yaml
 repos:
   - repo: https://github.com/antonbabenko/pre-commit-terraform.git
-    rev: v1.92.0
+    rev: v1.99.0
     hooks:
       - id: terraform_fmt
       - id: terraform_docs
