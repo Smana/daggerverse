@@ -1,6 +1,6 @@
 {
   "name": "kubeconform",
-  "engineVersion": "v0.16.3",
+  "engineVersion": "v0.18.9",
   "sdk": {
     "source": "go"
   },
