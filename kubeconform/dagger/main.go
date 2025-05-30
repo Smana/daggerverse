@@ -324,21 +324,21 @@ if [ -d /crds ]; then
   mv ./*.json "/schemas/"
 fi
 
-ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default")
+ARGS=("-summary" "--strict" "-ignore-missing-schemas" "-schema-location" "default" "--verbose")
 
 # Add the schemas directories to the kubeconform arguments if they exist
 if [ -n "$(find $1 -type f -print -quit)" ]; then
   ARGS+=("--schema-location" "/schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
 fi
 # Add the Datree catalog if enabled
-if [ $catalog -eq 1 ]; then
+if [[ $catalog -eq 1 ]]; then
   ARGS+=("--schema-location" "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
 fi
 
-if [ $kustomize -eq 1 ]; then
+if [[ $kustomize -eq 1 ]]; then
   for file in $(find_manifests "$manifests_dir" "kustomization.yaml,kustomization.yml" "$exclude"); do
     echo "Processing kustomization file: $file"
-    if [ $flux -eq 1 ]; then
+    if [[ $flux -eq 1 ]]; then
         if ! kustomize build $(dirname $file) | flux envsubst | kubeconform ${ARGS[@]} -; then
           echo "Validation failed for $file"
           exit 1
